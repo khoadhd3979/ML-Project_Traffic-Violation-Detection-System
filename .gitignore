@@ -216,3 +216,26 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Virtual Environment
+lpr_env/
+.venv/
+
+# Dataset
+datasets/
+dataset/
+data/
+runs/
+
+# YOLO weights
+*.pt
+
+# Virtual Environment
+lpr_env/
+venv/
+.venv/
+
+# Database
+*.db
+*.db-wal
+*.db-shm
