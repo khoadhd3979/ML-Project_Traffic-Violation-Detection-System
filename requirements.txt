@@ -1,0 +1,9 @@
+opencv-python
+ultralytics
+paddlepaddle
+paddleocr
+streamlit
+numpy
+torch
+openvino
+plotly
