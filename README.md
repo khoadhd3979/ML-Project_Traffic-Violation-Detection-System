@@ -41,17 +41,17 @@ Dự án được chia thành 3 khối lõi độc lập:
 
 ## 6. Hướng dẫn cài đặt và khởi chạy
 
-### Cài đặt môi trường
-Mở PowerShell dưới quyền Administrator (nếu cần thiết) và chạy lệnh:
-```powershell
-.\setup_env.ps1
-```
+### Cài đặt môi trường (Tự động)
+Hệ thống đi kèm một kịch bản (`script`) tự động dọn dẹp các môi trường ảo cũ (xóa thư mục `venv` rác), tạo môi trường `.venv` mới chuẩn xác và cài đặt toàn bộ thư viện.
 
-### Khởi chạy hệ thống
-Sau khi cài đặt xong, kích hoạt môi trường ảo:
+Mở **Terminal (PowerShell) trong VSCode** và chạy lần lượt 2 lệnh sau:
+
 ```powershell
-.\.venv\Scripts\Activate.ps1
-```
+# Bỏ qua giới hạn bảo mật của VSCode cho phiên làm việc hiện tại
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
+# Chạy kịch bản cài đặt tự động
+.\setup_env.ps1
 
 - **Khởi chạy Frontend (UI):**
   ```powershell
