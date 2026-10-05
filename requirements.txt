@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+streamlit
+ultralytics
+paddlepaddle
+paddleocr
+opencv-python
+pandas
+plotly
+sqlalchemy
