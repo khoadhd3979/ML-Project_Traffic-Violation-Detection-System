@@ -1,105 +1,50 @@
-### TUẦN 2: Xây dựng Backend API & Logic Vi Phạm (Thực Tế Hóa Dữ Liệu)
+**Tình trạng Sprint hiện tại:** Hệ thống đã hoàn thành Sprint 1 (Thiết lập cấu trúc Monorepo và Cơ sở dữ liệu). Tuần 2 này, nhóm sẽ tập trung giải quyết dứt điểm **Sprint 2** (Tích hợp Tracking & OCR) và bước đầu hoàn thành một nửa mục tiêu của **Sprint 3** (Xây dựng Backend API và tháo gỡ dữ liệu giả trên Frontend). Nếu hoàn thành xuất sắc các task của Tuần 2, nhóm sẽ đạt đủ điều kiện để chốt Sprint 2 và sẵn sàng cho đợt review API đầu tiên.
 
-**Tình trạng Sprint:** Đang ở Sprint 2. Hoàn thành các công việc dưới đây sẽ đạt 100% mục tiêu Sprint 2 và tạo đà kết nối toàn hệ thống.
-**Mục tiêu cốt lõi:** Loại bỏ dữ liệu giả (mock data), triển khai mô hình nhận diện vào luồng xử lý không gian và kết nối Frontend với Backend qua API.
+### 📅 KẾ HOẠCH LÀM VIỆC TUẦN 2: KẾT NỐI API & BẬT TRACKING
 
-1. **Khoa (AI/ML) — Nhánh `feature/ml-core-v2**`
-* Đưa các file trọng số mô hình (`.pt`) vào `src/models/` và kích hoạt tính năng Object Tracking (vd: ByteTrack) bên trong `detection.py`.
+Mục tiêu cốt lõi của Tuần 2 là đưa các mô hình tĩnh vào luồng phân tích động, xây dựng lớp Backend API bằng FastAPI, và nâng cấp Frontend để hiển thị 100% dữ liệu thật từ cơ sở dữ liệu.
 
+**1. Khoa (AI/ML Lead) — Nhánh `feature/ml-core**`
 
-* Lập trình logic không gian (Violation Engine) trong `src/features/processing.py` để phát hiện lỗi "Không đội mũ bảo hiểm" và "Sai làn đường".
+* **Kích hoạt Object Tracking:** Chuyển đổi từ Object Detection sang Tracking bằng cách cấu hình `model.track(persist=True)` trong `src/models/detection.py` để lấy `track_id` duy nhất cho từng xe, chống trùng lặp dữ liệu vi phạm.
+* **Viết Violation Engine:** Xây dựng logic phát hiện vi phạm Không đội mũ và Sai làn/Ngược chiều (dựa trên OpenCV Polygon và Bounding Box) tại `src/features/processing.py`.
+* **Tích hợp Database mới:** Cập nhật lại class `ViolationPipeline` để gọi đúng các hàm `create_vehicle()` và `create_violation()` từ `src/data/database_manager.py` khi phát hiện vi phạm.
+* **Sản phẩm đầu ra:** Script `tests/integration/live_test.py` chạy mượt mà một video mẫu, tự động nhận diện và đẩy chính xác các dòng dữ liệu vi phạm vào file SQLite.
 
+**2. Phúc (Backend & Data) — Nhánh `feature/backend-api**`
 
-* Kết nối luồng `tests/integration/live_test.py` để tự động gọi `DatabaseManager` lưu sự kiện vi phạm xuống SQLite.
+* **Dựng FastAPI Skeleton:** Khởi tạo ứng dụng FastAPI tại `src/api/main.py`. Cấu hình CORS để cho phép Frontend (chạy cổng 8501) gọi API (cổng 8000) mà không bị chặn.
+* **Xây dựng Endpoints cốt lõi:** Viết 2 API quan trọng nhất: `GET /api/violations` (truy vấn danh sách lỗi từ View `v_violation_details`) và `GET /api/stats` (đếm số lượng vi phạm phục vụ Dashboard).
+* **Tích hợp Pydantic:** Tạo file `src/api/schemas.py` định nghĩa các model Pydantic để chuẩn hóa dữ liệu JSON trả về cho Frontend.
+* **Sản phẩm đầu ra:** Swagger UI hoạt động tại `http://localhost:8000/docs`, trả về cục dữ liệu JSON chuẩn xác từ SQLite khi query.
 
+**3. Nguyên (Frontend UI) — Nhánh `feature/frontend-ui**`
 
-
-
-2. **Phúc (Backend & Data) — Nhánh `feature/backend-api-v2**`
-* Khởi tạo ứng dụng FastAPI tại `src/api/main.py`.
-
-
-* Xây dựng 2 RESTful endpoints nền tảng: `GET /api/violations` (truy vấn danh sách vi phạm từ view cơ sở dữ liệu) và `GET /api/stats` (lấy dữ liệu thống kê tổng quan).
-
-
-* Đảm bảo API trả về định dạng JSON chuẩn xác thông qua Pydantic schemas.
-
-
-3. **Nguyên (Frontend UI) — Nhánh `feature/frontend-ui-v2**`
-* Gỡ bỏ hoàn toàn hàm `_mock_initial_data()` trong `app/main.py`.
-* Sử dụng thư viện `requests` để gọi API từ Backend (`http://localhost:8000/api/...`) và đổ dữ liệu JSON thực tế lên Dashboard và bảng vi phạm.
-* Thỏa mãn Sprint 2 khi: F5 trình duyệt, UI hiển thị đúng dữ liệu lỗi mà file `live_test.py` vừa quét được.
-
-
+* **Xóa bỏ Mock Data:** Loại bỏ hoàn toàn hàm `_mock_initial_data()` trong `app/main.py`.
+* **Fetch dữ liệu từ Backend:** Sử dụng thư viện `requests` để gọi tới các endpoint FastAPI mà Phúc vừa viết. Nạp dữ liệu JSON nhận được vào Pandas DataFrame.
+* **Cập nhật Component:** Đổ dữ liệu thật vào các KPI Cards trên `dashboard.py` và bảng danh sách trên `violation_table.py`.
+* **Sản phẩm đầu ra:** Giao diện Streamlit hiển thị dữ liệu thật đang có trong SQLite. Khi Khoa chạy script ML nhận diện ra lỗi mới, Nguyên chỉ cần F5 trang là thấy số lượng tự nhảy.
 
 ---
 
-### TUẦN 3: Tích hợp OCR & Quản Lý Bằng Chứng (Evidence)
+### 🚀 LỘ TRÌNH CÁC TUẦN TIẾP THEO (TUẦN 3 -> TUẦN 5)
 
-**Tình trạng Sprint:** Bước vào Sprint 3. Hoàn thành tuần này sẽ có một luồng End-to-End hoàn chỉnh (từ video đến hình ảnh bằng chứng trên Web).
-**Mục tiêu cốt lõi:** Đọc biển số xe chuẩn xác, lưu hình ảnh bằng chứng cắt từ camera và hiển thị chúng trên giao diện Web.
+**TUẦN 3: Quản lý Bằng chứng (Evidence) & Hoàn thiện Sprint 3**
 
-1. **Khoa (AI/ML)**
-* Tích hợp và tối ưu PaddleOCR bên trong `src/models/ocr_engine.py` để đọc biển số.
+* **Mục tiêu:** Xử lý triệt để việc chụp, lưu trữ ảnh vi phạm và hiển thị lên giao diện.
+* **Khoa (`feature/ml-core`):** Hoàn thiện PaddleOCR trong `ocr_engine.py`. Viết hàm crop ảnh sắc nét tại thời điểm vi phạm và lưu vào thư mục `data/evidence/` theo chuẩn định dạng.
+* **Phúc (`feature/backend-api`):** Dùng `StaticFiles` của FastAPI để serve thư mục `data/evidence/`. Viết thêm API logic cho Chatbot.
+* **Nguyên (`feature/frontend-ui`):** Cập nhật `violation_table.py` để khi click vào một hàng, UI sẽ hiển thị ảnh bằng chứng load từ URL của Backend.
 
+**TUẦN 4: Real-time Streaming & Chatbot (Chốt Sprint 4)**
 
-* Bổ sung hàm cắt (crop) ảnh khung hình vi phạm (rõ biển số, rõ lỗi) và lưu vào `data/evidence/` theo đúng chuẩn đặt tên.
+* **Mục tiêu:** Giảm độ trễ, biến hệ thống thành Real-time Live Monitor.
+* **Khoa (`feature/ml-core`):** Đưa `ocr_worker_proc.py` vào hoạt động để xử lý biển số chạy ngầm (Background Worker), giúp FPS video không bị tụt.
+* **Phúc (`feature/backend-api`):** Thiết lập WebSockets hoặc Server-Sent Events (SSE) để tự động push sự kiện mới lên Frontend ngay khi có vi phạm được ghi vào DB.
+* **Nguyên (`feature/frontend-ui`):** Lắng nghe WebSocket trong `live_monitor.py` để cập nhật danh sách "Sự kiện gần nhất" theo thời gian thực mà không cần reload trang. Tích hợp giao diện Chatbot.
 
+**TUẦN 5: Đánh giá Mô hình & MVP Release (Chốt Sprint 5)**
 
-
-
-2. **Phúc (Backend & Data)**
-* Cấu hình `StaticFiles` trên FastAPI để Frontend có thể truy cập ảnh từ thư mục `data/evidence/`.
-* Xây dựng endpoint hỗ trợ Chatbot: Nhận câu hỏi từ UI, truy vấn dữ liệu theo biển số/loại lỗi từ DB và trả về câu trả lời.
-
-
-3. **Nguyên (Frontend UI)**
-* Cập nhật `app/components/violation_table.py`: Khi người dùng click vào một hàng, giao diện sẽ tải và hiển thị ảnh bằng chứng từ Static URL của Backend.
-
-
-* Điều hướng khung nhập liệu trong `chatbot_ui.py` để gọi tới API Chatbot của Phúc thay vì tự xử lý logic nội bộ.
-
-
-
----
-
-### TUẦN 4: Live Monitor & Xử Lý Thời Gian Thực (Bất Đồng Bộ)
-
-**Tình trạng Sprint:** Bước vào Sprint 4. Hoàn thành tuần này hệ thống sẽ đạt tiêu chuẩn Real-time.
-**Mục tiêu cốt lõi:** Loại bỏ tình trạng giật lag khi nhận diện, đẩy dữ liệu vi phạm lên UI theo thời gian thực mà không cần tải lại trang.
-
-1. **Khoa (AI/ML)**
-* Đẩy tiến trình OCR và ghi Database vào hàng đợi chạy ngầm (Background Worker trong `ocr_worker_proc.py`) để không chặn luồng đọc khung hình chính.
-* Tối ưu hóa FPS xử lý video cho module Live Monitor.
-
-
-2. **Phúc (Backend & Data)**
-* Cấu hình WebSocket hoặc Server-Sent Events (SSE) trên FastAPI.
-* Bắn sự kiện (Push event) tức thời lên Frontend ngay khi `DatabaseManager` ghi nhận một dòng vi phạm mới.
-
-
-3. **Nguyên (Frontend UI)**
-* Bắt kết nối WebSocket trong `app/components/live_monitor.py`.
-* Cập nhật bảng "Sự kiện gần nhất" động trên màn hình camera ngay khi AI bắt được lỗi mới mà không làm đơ video đang phát.
-
-
-
----
-
-### TUẦN 5: Đánh giá Mô Hình, QA & Đóng Gói (MVP Release)
-
-**Tình trạng Sprint:** Bước vào Sprint 5. Hoàn thành tuần này sẽ chốt toàn bộ đồ án và sẵn sàng báo cáo.
-**Mục tiêu cốt lõi:** Đắp phần lõi Data Science đang thiếu, dọn dẹp lỗi vặt và xuất file báo cáo 학 thuật.
-
-1. **Khoa (AI/ML)**
-* Sử dụng thư mục `notebooks/` để viết script đánh giá model (Model Evaluation).
-* Chạy tập test để lấy các chỉ số mAP, Precision, Recall và vẽ Confusion Matrix cho YOLOv8, xuất đồ thị phục vụ báo cáo.
-
-
-
-
-2. **Phúc & Nguyên (Backend/Frontend)**
-* Đóng băng mã nguồn (Code Freeze): Không phát triển thêm tính năng mới.
-* Bắt lỗi vặt (QA), bắt các trường hợp API sập do sai định dạng (Pydantic validation).
-* Dọn dẹp code rác, hoàn thiện Swagger UI Docs tại `localhost:8000/docs` và tinh chỉnh lại CSS.
-* Quay video Demo kịch bản toàn hệ thống.
+* **Mục tiêu:** Hoàn thiện báo cáo, QA và nghiệm thu đồ án.
+* **Khoa (`feature/ml-core`):** Viết các script trong thư mục `notebooks/` để đo đạc mAP50, Precision, Recall, vẽ Confusion Matrix xuất ra biểu đồ cho báo cáo cuối kỳ.
+* **Phúc & Nguyên (`feature/backend-api`, `feature/frontend-ui`):** Code freeze (Không thêm tính năng mới). Bắt bug, xử lý các lỗi sập giao diện, dọn dẹp mã nguồn, comment giải thích code và hoàn thiện Swagger Docs. Toàn đội chạy kịch bản quay video demo.
