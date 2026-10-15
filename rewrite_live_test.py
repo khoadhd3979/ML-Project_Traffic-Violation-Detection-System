@@ -14,7 +14,7 @@ content = re.sub(r'from ML\.src\.utils\.config import', r'from src.utils.config 
 content = re.sub(r'import database_manager as db', r'from src.data.database_manager import DatabaseManager\ndb_manager = DatabaseManager()', content)
 
 # Fix init_db
-content = re.sub(r'conn = db\.init_db\(\)\n    conn\.close\(\)', r'db_manager.init_db("src/data/schema.sql")\n    session_id = db_manager.create_processing_session(session_name="Live Session", source_type="camera", source_path=str(video_source))', content)
+content = re.sub(r'conn = db\.init_db\(\)\n    conn\.close\(\)', r'db_manager.init_db("src/data/schema.sql")\n    session_id = db_manager.create_processing_session(session_name="Live Session", source_type="webcam", source_path=str(video_source))', content)
 
 # Fix update_detected_plate
 replacement = '''

@@ -239,3 +239,20 @@ venv/
 *.db
 *.db-wal
 *.db-shm
+
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Thư mục lưu bằng chứng và video
+data/evidence/*
+data/raw/*
+!data/evidence/.gitkeep
+!data/raw/.gitkeep
+
+# Môi trường ảo & Cache
+.venv/
+__pycache__/
+.pytest_cache/

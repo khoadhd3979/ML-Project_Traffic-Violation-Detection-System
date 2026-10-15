@@ -42,9 +42,9 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 **Bước 5: Tạo nhánh mới để làm việc (BẮT BUỘC)**
 
 * Không ai được code trực tiếp trên nhánh `main`. Mỗi người hãy tạo một nhánh làm việc mới tinh (có đuôi `v2`) từ cấu trúc mới này:
-* **Khoa (ML):** `git checkout -b feature/ml-core-v2`
-* **Phúc (Backend):** `git checkout -b feature/backend-api-v2`
-* **Nguyên (Frontend):** `git checkout -b feature/frontend-ui-v2`
+* **Khoa (ML):** `git checkout -b feature/ml-core`
+* **Phúc (Backend):** `git checkout -b feature/backend-api`
+* **Nguyên (Frontend):** `git checkout -b feature/frontend-ui`
 
 
 

@@ -1,51 +1,96 @@
+import os
 from ultralytics import YOLO
 
-model = YOLO("models/best_second.pt")
+# Đường dẫn tới 2 file trọng số
+MODEL_HELMET_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "models", "weights_helmet", "helmet_best.pt"))
+MODEL_PLATE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "models", "weights_plate", "plate_best.pt"))
 
-CONF_THRESHOLD = 0.5
+# Load 2 model YOLOv8 riêng biệt
+model_helmet = YOLO(MODEL_HELMET_PATH)
+print(f"\n[INFO] Danh sách nhãn của Model Helmet: {model_helmet.names}\n")
+model_plate = YOLO(MODEL_PLATE_PATH)
+
+CONF_THRESHOLD = 0.3
 
 
-def detect_license_plate(image):
+def track_vehicles_and_helmets(image):
     """
-    Theo dõi đa đối tượng bằng ByteTrack (thay cho detect đơn lẻ trước đây).
+    Theo dõi phương tiện, nón và lỗi không đội nón bằng ByteTrack.
 
-    Trả về: list[dict], mỗi phần tử tương ứng 1 phương tiện/biển số phát hiện được:
+    Class dự kiến từ model_helmet:
+        0: driver_with_helmet
+        1: bike
+        2: driver
+        3: passenger_with_helemt
+        4: passenger
+        5: driver_without_helmet
+        6: passenger_without_helemt
+
+    Trả về: list[dict], mỗi phần tử gồm:
         {
-            "bbox": [x1, y1, x2, y2],   # tọa độ theo hệ tọa độ của `image` đầu vào
-            "track_id": int,             # ID theo dõi ổn định qua các frame (ByteTrack)
-            "class_id": int,             # class phát hiện được (theo model.names)
+            "bbox": [x1, y1, x2, y2],
+            "track_id": int hoặc None,
+            "class_id": int,
+            "conf": float
         }
-
-    Nếu ByteTrack chưa gán được track_id cho frame này (VD: frame đầu tiên,
-    hoặc object vừa mất track), trả về list rỗng cho các box đó — main loop
-    sẽ tự bỏ qua và chờ frame tiếp theo.
     """
-    results = model.track(
+    results = model_helmet.track(
         image,
         persist=True,
         tracker="bytetrack.yaml",
-        imgsz=640,
         verbose=False,
     )
 
     detections = []
-    boxes = results[0].boxes
+    if not results or len(results) == 0:
+        return detections
 
-    # boxes.id là None khi chưa có track nào được khởi tạo/duy trì cho frame này
-    if boxes is None or boxes.id is None or len(boxes) == 0:
+    boxes = results[0].boxes
+    if boxes is None or len(boxes) == 0:
         return detections
 
     xyxy = boxes.xyxy.cpu().numpy()
-    track_ids = boxes.id.cpu().numpy().astype(int)
     class_ids = boxes.cls.cpu().numpy().astype(int)
     confs = boxes.conf.cpu().numpy()
 
-    for bbox, track_id, class_id, conf in zip(xyxy, track_ids, class_ids, confs):
+    track_ids = None
+    if boxes.id is not None:
+        track_ids = boxes.id.cpu().numpy().astype(int)
+
+    for i, (bbox, class_id, conf) in enumerate(zip(xyxy, class_ids, confs)):
         if conf > CONF_THRESHOLD:
+            tid = int(track_ids[i]) if track_ids is not None else None
             detections.append({
-                "bbox": bbox,
-                "track_id": int(track_id),
+                "bbox": [float(x) for x in bbox],
+                "track_id": tid,
                 "class_id": int(class_id),
+                "conf": float(conf),
             })
 
     return detections
+
+
+def detect_plate_in_crop(vehicle_crop_img):
+    """
+    Dùng model_plate phát hiện vị trí biển số trên ảnh crop của xe máy.
+
+    Trả về:
+        [x1, y1, x2, y2] (tọa độ Bounding Box của biển số theo hệ tọa độ của vehicle_crop_img)
+        hoặc None nếu không phát hiện được biển số.
+    """
+    if vehicle_crop_img is None or vehicle_crop_img.size == 0:
+        return None
+
+    results = model_plate.predict(vehicle_crop_img, verbose=False)
+    if not results or len(results) == 0:
+        return None
+
+    boxes = results[0].boxes
+    if boxes is None or len(boxes) == 0:
+        return None
+
+    # Lấy bounding box có confidence cao nhất
+    best_idx = boxes.conf.argmax().item()
+    best_bbox = boxes.xyxy[best_idx].cpu().numpy().tolist()
+    return [float(x) for x in best_bbox]
+
