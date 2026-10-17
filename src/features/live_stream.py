@@ -5,7 +5,7 @@ import cv2
 import multiprocessing as mp
 
 from src.models.detection import track_vehicles_and_helmets, detect_plate_in_crop
-from src.features.processing import process_plate, check_helmet_violation
+from src.features.processing import process_plate, check_helmet_violation, crop_with_padding
 from src.models import ocr_worker_proc
 from src.data.database_manager import DatabaseManager
 
@@ -118,13 +118,19 @@ def generate_live_stream(source=0):
                 if track_id not in recorded_violations:
                     try:
                         # Lưu ảnh bằng chứng xe vi phạm vào thư mục data/evidence/{YYYYMMDD}/
+                        # Evidence = toàn bộ người vi phạm + toàn bộ xe (full_violator_bbox từ
+                        # processing.py), crop từ frame gốc, có padding nhỏ và đã clamp vào frame.
+                        # KHÔNG dùng vehicle_crop (chỉ xe) làm evidence; vehicle_crop vẫn dùng cho OCR biển số.
                         evidence_rel_path = None
-                        if vehicle_crop.size > 0:
+                        full_violator_crop = crop_with_padding(frame, v.get("full_violator_bbox"))
+                        if full_violator_crop is not None:
                             day_dir = os.path.join("data", "evidence", time.strftime("%Y%m%d"))
                             os.makedirs(day_dir, exist_ok=True)
                             evidence_filename = f"track_{track_id}_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
                             evidence_rel_path = os.path.join(day_dir, evidence_filename).replace("\\", "/")
-                            cv2.imwrite(evidence_rel_path, vehicle_crop)
+                            cv2.imwrite(evidence_rel_path, full_violator_crop)
+                        else:
+                            print(f"[LiveStream Warning] full_violator_bbox không hợp lệ cho track_id={track_id}: {v.get('full_violator_bbox')}")
 
                         unknown_vehicle = db_manager.get_vehicle_by_plate("UNKNOWN")
                         if not unknown_vehicle:

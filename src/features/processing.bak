@@ -1,0 +1,110 @@
+# import cv2
+# import numpy as np
+# import os
+
+
+# def process_plate(image, bbox):
+#     h_img, w_img = image.shape[:2]
+#     x_min, y_min, x_max, y_max = map(int, bbox)
+
+#     x_min, y_min = max(0, x_min), max(0, y_min)
+#     x_max, y_max = min(w_img, x_max), min(h_img, y_max)
+
+#     plate_crop = image[y_min:y_max, x_min:x_max]
+
+#     if plate_crop.size == 0:
+#         return None
+
+#     h_crop, w_crop = plate_crop.shape[:2]
+#     ratio = 200.0 / float(h_crop)
+#     plate_crop = cv2.resize(plate_crop, (int(w_crop * ratio), 200), interpolation=cv2.INTER_CUBIC)
+
+#     # Chuyển sang hệ màu YUV để chỉ tăng độ sáng (kênh Y) mà không làm hỏng màu (U, V)
+#     img_yuv = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2YUV)
+
+#     # Dùng CLAHE để cân bằng sáng (khử bóng râm, chống chói)
+#     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+#     img_yuv[:,:,0] = clahe.apply(img_yuv[:,:,0])
+
+#     # Chuyển ngược lại về ảnh BGR (ảnh màu chuẩn)
+#     enhanced_plate = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)
+
+#     return enhanced_plate
+
+
+# def check_helmet_violation(detections):
+#     """
+#     Kiểm tra vi phạm không đội nón bảo hiểm từ danh sách detections.
+#     Class 0: driver_with_helmet
+#     Class 1: bike
+#     Class 2: driver
+#     Class 3: passenger_with_helemt
+#     Class 4: passenger
+#     Class 5: driver_without_helmet
+#     Class 6: passenger_without_helemt
+
+#     Trả về danh sách các xe máy vi phạm (gồm track_id và bbox của xe).
+#     """
+#     motorcycles = []
+#     no_helmets = []
+
+#     for det in detections:
+#         cls_id = det.get("class_id")
+#         if cls_id == 1:
+#             motorcycles.append(det)
+#         elif cls_id in [5, 6]:
+#             no_helmets.append(det)
+
+#     violating_vehicles = []
+#     violating_track_ids = set()
+
+#     for bike in motorcycles:
+#         bike_track_id = bike.get("track_id")
+#         if bike_track_id is None:
+#             continue
+
+#         bx1, by1, bx2, by2 = bike["bbox"]
+#         bw = bx2 - bx1
+#         bh = by2 - by1
+
+#         # Mở rộng không gian quanh xe máy để ghép cặp nhạy hơn:
+#         # Cho phép nón nhô lên phía trên xe (35% bh) và mở rộng 2 bên (20% bw)
+#         exp_bx1 = bx1 - 0.10 * bw
+#         exp_bx2 = bx2 + 0.10 * bw
+#         exp_by1 = by1 - 0.35 * bh
+#         exp_by2 = by2 + 0.10 * bh
+
+#         is_violating = False
+#         for nh in no_helmets:
+#             nx1, ny1, nx2, ny2 = nh["bbox"]
+            
+#             # Tính tâm Bounding Box của khong_mu
+#             cx = (nx1 + nx2) / 2.0
+#             cy = (ny1 + ny2) / 2.0
+
+#             # 1. Kiểm tra tâm khong_mu nằm bên trong bbox mở rộng của xe máy
+#             if (exp_bx1 <= cx <= exp_bx2) and (exp_by1 <= cy <= exp_by2):
+#                 is_violating = True
+#                 break
+
+#             # 2. Nới lỏng ngưỡng diện tích giao nhau Overlapping (xuống >= 20% thay vì 50% cũ)
+#             inter_x1 = max(exp_bx1, nx1)
+#             inter_y1 = max(exp_by1, ny1)
+#             inter_x2 = min(exp_bx2, nx2)
+#             inter_y2 = min(exp_by2, ny2)
+
+#             if inter_x2 > inter_x1 and inter_y2 > inter_y1:
+#                 inter_area = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
+#                 nh_area = (nx2 - nx1) * (ny2 - ny1)
+#                 if nh_area > 0 and (inter_area / nh_area) >= 0.30:
+#                     is_violating = True
+#                     break
+
+#         if is_violating and bike_track_id not in violating_track_ids:
+#             violating_track_ids.add(bike_track_id)
+#             violating_vehicles.append({
+#                 "track_id": bike_track_id,
+#                 "bbox": bike["bbox"],
+#             })
+
+#     return violating_vehicles

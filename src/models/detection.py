@@ -10,7 +10,28 @@ model_helmet = YOLO(MODEL_HELMET_PATH)
 print(f"\n[INFO] Danh sách nhãn của Model Helmet: {model_helmet.names}\n")
 model_plate = YOLO(MODEL_PLATE_PATH)
 
-CONF_THRESHOLD = 0.3
+# Giữ lại tên cũ: dùng làm ngưỡng mặc định cho các class không có ngưỡng riêng
+# (class 0, 2, 3, 4). Giá trị đổi từ 0.3 -> 0.40 theo yêu cầu.
+CONF_THRESHOLD = 0.40
+
+# Ngưỡng riêng theo class_id. GIÁ TRỊ KHỞI ĐẦU, chưa được tối ưu bằng dữ liệu đánh giá.
+#   1: bike                     -> 0.35 (giữ độ nhạy, vì xe là "mỏ neo" để ghép cặp)
+#   5: driver_without_helmet    -> 0.45 (class gây phạt nên cần chắc chắn hơn)
+#   6: passenger_without_helemt -> 0.45
+CLASS_CONF_THRESHOLDS = {
+    1: 0.35,
+    5: 0.45,
+    6: 0.45,
+}
+
+# Ngưỡng conf truyền cho model_helmet.track(). Đặt tường minh để không phụ thuộc
+# giá trị mặc định của Ultralytics (0.25 ở các bản hiện hành) và phải <= mọi
+# ngưỡng theo class ở trên, để việc lọc theo class diễn ra SAU tracker.
+TRACK_CONF = 0.25
+
+
+def _threshold_for(class_id):
+    return CLASS_CONF_THRESHOLDS.get(int(class_id), CONF_THRESHOLD)
 
 
 def track_vehicles_and_helmets(image):
@@ -26,6 +47,9 @@ def track_vehicles_and_helmets(image):
         5: driver_without_helmet
         6: passenger_without_helemt
 
+    Ngưỡng confidence được áp dụng theo từng class (CLASS_CONF_THRESHOLDS,
+    mặc định CONF_THRESHOLD) sau khi tracker đã chạy.
+
     Trả về: list[dict], mỗi phần tử gồm:
         {
             "bbox": [x1, y1, x2, y2],
@@ -38,6 +62,7 @@ def track_vehicles_and_helmets(image):
         image,
         persist=True,
         tracker="bytetrack.yaml",
+        conf=TRACK_CONF,
         verbose=False,
     )
 
@@ -58,7 +83,7 @@ def track_vehicles_and_helmets(image):
         track_ids = boxes.id.cpu().numpy().astype(int)
 
     for i, (bbox, class_id, conf) in enumerate(zip(xyxy, class_ids, confs)):
-        if conf > CONF_THRESHOLD:
+        if conf > _threshold_for(class_id):
             tid = int(track_ids[i]) if track_ids is not None else None
             detections.append({
                 "bbox": [float(x) for x in bbox],
@@ -93,4 +118,3 @@ def detect_plate_in_crop(vehicle_crop_img):
     best_idx = boxes.conf.argmax().item()
     best_bbox = boxes.xyxy[best_idx].cpu().numpy().tolist()
     return [float(x) for x in best_bbox]
-
