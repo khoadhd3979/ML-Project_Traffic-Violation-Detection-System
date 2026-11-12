@@ -221,10 +221,11 @@ __marimo__/
 lpr_env/
 .venv/
 
-# Dataset
+# Dataset & Data
 datasets/
 dataset/
-data/
+/data/
+!src/data/
 runs/
 
 # YOLO weights

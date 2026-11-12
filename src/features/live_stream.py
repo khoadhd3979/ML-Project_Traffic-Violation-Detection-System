@@ -218,27 +218,35 @@ def generate_live_stream(source=0):
             except Exception:
                 pass
 
-            # 3. Draw bounding boxes & labels
+            # 3. Draw bounding boxes & labels (tự động co giãn theo độ phân giải frame, hỗ trợ video 4K dọc như 1pc.mp4)
+            scale_factor = max(1.0, min(w_frame, h_frame) / 720.0)
+            box_thickness = max(2, int(scale_factor * 2))
+            font_scale = max(0.6, scale_factor * 0.5)
+            font_thickness = max(1, int(scale_factor * 1.5))
+
             for v in violating_vehicles:
                 track_id = v["track_id"]
                 vx1, vy1, vx2, vy2 = map(int, v["bbox"])
                 vx1, vy1 = max(0, vx1), max(0, vy1)
                 vx2, vy2 = min(w_frame, vx2), min(h_frame, vy2)
 
-                cv2.rectangle(frame, (vx1, vy1), (vx2, vy2), (0, 0, 255), 2)
+                cv2.rectangle(frame, (vx1, vy1), (vx2, vy2), (0, 0, 255), box_thickness)
                 plate_str = track_plates.get(track_id, "KHONG DOI NON")
                 label = f"ID {track_id}: {plate_str}"
 
-                (w_txt, h_txt), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                cv2.rectangle(frame, (vx1, max(0, vy1 - h_txt - 10)), (vx1 + w_txt + 10, vy1), (0, 0, 255), -1)
-                cv2.putText(frame, label, (vx1 + 5, max(15, vy1 - 5)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                (w_txt, h_txt), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+                pad = int(5 * scale_factor)
+                cv2.rectangle(frame, (vx1, max(0, vy1 - h_txt - 2 * pad)), (vx1 + w_txt + 2 * pad, vy1), (0, 0, 255), -1)
+                cv2.putText(frame, label, (vx1 + pad, max(h_txt + pad, vy1 - pad)),
+                            cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness)
 
             curr_time = time.time()
             fps = 1.0 / (curr_time - prev_time) if (curr_time - prev_time) > 0 else 0
             prev_time = curr_time
-            cv2.putText(frame, f"FPS: {fps:.1f} | Vi pham: {len(violating_vehicles)}", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            fps_pad = int(10 * scale_factor)
+            fps_y = int(35 * scale_factor)
+            cv2.putText(frame, f"FPS: {fps:.1f} | Vi pham: {len(violating_vehicles)}", (fps_pad, fps_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), font_thickness)
 
             info = {
                 "fps": fps,
