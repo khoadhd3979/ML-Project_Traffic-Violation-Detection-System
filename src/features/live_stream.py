@@ -86,6 +86,13 @@ def generate_live_stream(source=0):
     recorded_violations = {} # track_id -> plate_text
     track_plates = {}        # track_id -> plate_text
 
+    # -------------------------------------------------------------------------
+    # Cấu hình Debouncing: Chỉ xác nhận vi phạm sau N frame liên tiếp
+    # Giảm thiểu tối đa dương tính giả do lỗi chập chờn / bắt nhầm của model AI
+    # -------------------------------------------------------------------------
+    VIOLATION_CONFIRM_FRAMES = 3
+    track_violation_streak = {} # track_id -> số frame liên tiếp vi phạm
+
     frame_count = 0
     prev_time = time.time()
 
@@ -102,10 +109,30 @@ def generate_live_stream(source=0):
             detections = track_vehicles_and_helmets(frame)
             violating_vehicles = check_helmet_violation(detections)
 
+            # Cập nhật bộ đếm Debouncing theo track_id
+            current_violating_ids = set()
+            for v in violating_vehicles:
+                tid = v.get("track_id")
+                if tid is not None:
+                    current_violating_ids.add(tid)
+                    track_violation_streak[tid] = track_violation_streak.get(tid, 0) + 1
+
+            # Reset streak cho các xe máy có mặt trong frame nhưng không vi phạm (hoặc đội mũ)
+            all_bike_tracks = set(d.get("track_id") for d in detections if d.get("class_id") == 1 and d.get("track_id") is not None)
+            for tid in all_bike_tracks:
+                if tid not in current_violating_ids and tid not in recorded_violations:
+                    track_violation_streak[tid] = 0
+
             latest_violation_info = None
             now = time.time()
 
-            for v in violating_vehicles:
+            # Lọc các xe máy đã đạt đủ số frame vi phạm liên tiếp (streak >= VIOLATION_CONFIRM_FRAMES)
+            confirmed_violators = [
+                v for v in violating_vehicles 
+                if v.get("track_id") is not None and track_violation_streak.get(v.get("track_id"), 0) >= VIOLATION_CONFIRM_FRAMES
+            ]
+
+            for v in confirmed_violators:
                 track_id = v["track_id"]
                 vx1, vy1, vx2, vy2 = map(int, v["bbox"])
                 vx1, vy1 = max(0, vx1), max(0, vy1)
@@ -113,14 +140,9 @@ def generate_live_stream(source=0):
 
                 vehicle_crop = frame[vy1:vy2, vx1:vx2]
 
-
-                # DECOUPLING: Ghi nhận ngay vi phạm vào DB với biển "UNKNOWN" để tránh rớt vi phạm
+                # Ghi nhận vi phạm vào DB với biển "UNKNOWN" khi đã qua bộ lọc debounce
                 if track_id not in recorded_violations:
                     try:
-                        # Lưu ảnh bằng chứng xe vi phạm vào thư mục data/evidence/{YYYYMMDD}/
-                        # Evidence = toàn bộ người vi phạm + toàn bộ xe (full_violator_bbox từ
-                        # processing.py), crop từ frame gốc, có padding nhỏ và đã clamp vào frame.
-                        # KHÔNG dùng vehicle_crop (chỉ xe) làm evidence; vehicle_crop vẫn dùng cho OCR biển số.
                         evidence_rel_path = None
                         full_violator_crop = crop_with_padding(frame, v.get("full_violator_bbox"))
                         if full_violator_crop is not None:
@@ -162,10 +184,9 @@ def generate_live_stream(source=0):
                             "violation": "Không đội mũ bảo hiểm",
                             "evidence_path": evidence_rel_path
                         }
-                        print(f"[LiveStream Decoupled] Đã ghi nhận vi phạm cho track_id={track_id} (Ảnh bằng chứng: {evidence_rel_path})")
+                        print(f"[LiveStream Debounced] Đã xác nhận vi phạm sau {VIOLATION_CONFIRM_FRAMES} frames liên tiếp cho track_id={track_id} (Ảnh bằng chứng: {evidence_rel_path})")
                     except Exception as db_err:
                         print(f"[LiveStream DB Error] {db_err}")
-
 
                 last_sent = ocr_sent_time.get(track_id, 0.0)
                 if vehicle_crop.size > 0 and (now - last_sent) >= 1.0:
@@ -218,21 +239,62 @@ def generate_live_stream(source=0):
             except Exception:
                 pass
 
-            # 3. Draw bounding boxes & labels
+            # 3. Draw bounding boxes & labels (tự động co giãn theo độ phân giải frame, hỗ trợ video 4K dọc như 1pc.mp4)
+            scale_factor = max(1.0, min(w_frame, h_frame) / 720.0)
+            box_thickness = max(2, int(scale_factor * 2))
+            font_scale = max(0.5, scale_factor * 0.45)
+            font_thickness = max(1, int(scale_factor * 1.5))
+
+            # 3.1 Vẽ trực quan các vùng đầu: Có mũ bảo hiểm (Xanh lá) và Không đội mũ (Đỏ)
+            for det in detections:
+                cls_id = det.get("class_id")
+                conf = det.get("conf", 0.0)
+                bx1, by1, bx2, by2 = map(int, det["bbox"])
+                bx1, by1 = max(0, bx1), max(0, by1)
+                bx2, by2 = min(w_frame, bx2), min(h_frame, by2)
+
+                if cls_id in (0, 3):  # driver_with_helmet, passenger_with_helemt
+                    color = (0, 200, 0)
+                    text_lbl = f"Co mu {conf:.2f}"
+                elif cls_id in (5, 6):  # driver_without_helmet, passenger_without_helemt
+                    color = (0, 0, 255)
+                    text_lbl = f"Khong mu {conf:.2f}"
+                else:
+                    continue
+
+                cv2.rectangle(frame, (bx1, by1), (bx2, by2), color, max(1, box_thickness - 1))
+                (tw, th), _ = cv2.getTextSize(text_lbl, cv2.FONT_HERSHEY_SIMPLEX, font_scale * 0.85, font_thickness)
+                pad_h = int(3 * scale_factor)
+                cv2.rectangle(frame, (bx1, max(0, by1 - th - 2 * pad_h)), (bx1 + tw + 2 * pad_h, by1), color, -1)
+                cv2.putText(frame, text_lbl, (bx1 + pad_h, max(th + pad_h, by1 - pad_h)),
+                            cv2.FONT_HERSHEY_SIMPLEX, font_scale * 0.85, (255, 255, 255), font_thickness)
+
+            # 3.2 Vẽ xe máy:
+            # - Xe đã xác nhận vi phạm (streak >= VIOLATION_CONFIRM_FRAMES): Khung ĐỎ đậm
+            # - Xe đang nghi vấn (chờ đủ streak): Khung VÀNG cam (ví dụ: Nghi van 1/3)
             for v in violating_vehicles:
                 track_id = v["track_id"]
                 vx1, vy1, vx2, vy2 = map(int, v["bbox"])
                 vx1, vy1 = max(0, vx1), max(0, vy1)
                 vx2, vy2 = min(w_frame, vx2), min(h_frame, vy2)
 
-                cv2.rectangle(frame, (vx1, vy1), (vx2, vy2), (0, 0, 255), 2)
-                plate_str = track_plates.get(track_id, "KHONG DOI NON")
-                label = f"ID {track_id}: {plate_str}"
+                streak = track_violation_streak.get(track_id, 0)
+                is_confirmed = streak >= VIOLATION_CONFIRM_FRAMES
 
-                (w_txt, h_txt), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                cv2.rectangle(frame, (vx1, max(0, vy1 - h_txt - 10)), (vx1 + w_txt + 10, vy1), (0, 0, 255), -1)
-                cv2.putText(frame, label, (vx1 + 5, max(15, vy1 - 5)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                if is_confirmed:
+                    box_color = (0, 0, 255)  # Đỏ
+                    plate_str = track_plates.get(track_id, "KHONG DOI NON")
+                    label = f"ID {track_id}: {plate_str}"
+                else:
+                    box_color = (0, 165, 255)  # Cam/Vàng
+                    label = f"ID {track_id}: Nghi van ({streak}/{VIOLATION_CONFIRM_FRAMES})"
+
+                cv2.rectangle(frame, (vx1, vy1), (vx2, vy2), box_color, box_thickness)
+                (w_txt, h_txt), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+                pad = int(5 * scale_factor)
+                cv2.rectangle(frame, (vx1, max(0, vy1 - h_txt - 2 * pad)), (vx1 + w_txt + 2 * pad, vy1), box_color, -1)
+                cv2.putText(frame, label, (vx1 + pad, max(h_txt + pad, vy1 - pad)),
+                            cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness)
 
             curr_time = time.time()
             fps = 1.0 / (curr_time - prev_time) if (curr_time - prev_time) > 0 else 0

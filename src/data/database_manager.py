@@ -214,6 +214,17 @@ class DatabaseManager:
             conn.execute(query, (vehicle_id, violation_id))
             conn.commit()
 
+    def update_violation_status(self, violation_id: int, status: str) -> bool:
+        """Cập nhật trạng thái duyệt vi phạm ('pending', 'approved', 'rejected') cho CSGT."""
+        if status not in ("pending", "approved", "rejected"):
+            return False
+        query = "UPDATE violations SET status = ? WHERE id = ?;"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (status, violation_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
     def get_violations(
         self,
         limit: int = 100,

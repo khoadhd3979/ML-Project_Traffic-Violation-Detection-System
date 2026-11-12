@@ -269,6 +269,27 @@ def show_full_history_dialog(df):
                 st.image(selected_path, caption=f"Ảnh bằng chứng: {selected_label}", use_container_width=True)
             else:
                 st.warning(f"File ảnh bằng chứng không tồn tại hoặc đã bị di chuyển: '{selected_path}'")
+
+            # Thẩm định nghiệp vụ CSGT (Human-in-the-Loop)
+            try:
+                selected_v_id = int(selected_label.split(" - ")[0].replace("ID ", "").strip())
+            except Exception:
+                selected_v_id = None
+
+            if selected_v_id is not None:
+                c_app, c_rej = st.columns(2)
+                with c_app:
+                    if st.button("✅ Phê duyệt xử phạt", key=f"app_{selected_v_id}", type="primary", use_container_width=True):
+                        if db is not None:
+                            db.DatabaseManager().update_violation_status(selected_v_id, "approved")
+                        st.success("✅ Đã phê duyệt biên bản xử phạt!")
+                        st.rerun()
+                with c_rej:
+                    if st.button("❌ Bác bỏ (Bắt nhầm / Có đội mũ)", key=f"rej_{selected_v_id}", use_container_width=True):
+                        if db is not None:
+                            db.DatabaseManager().update_violation_status(selected_v_id, "rejected")
+                        st.info("ℹ️ Đã bác bỏ biên bản vi phạm này!")
+                        st.rerun()
         else:
             st.info("Chưa có ảnh bằng chứng nào được lưu trong hệ thống.")
     
@@ -432,7 +453,15 @@ def main():
             try:
                 for frame, info in generate_live_stream(source=video_path):
                     processed_frames += 1
-                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    # Tự động co nhỏ frame hiển thị nếu video quá lớn (như 4K dọc ở 1pc.mp4) để tránh lag WebSocket
+                    h_f, w_f = frame.shape[:2]
+                    max_dim = max(h_f, w_f)
+                    if max_dim > 1080:
+                        disp_scale = 1080.0 / max_dim
+                        preview_frame = cv2.resize(frame, (int(w_f * disp_scale), int(h_f * disp_scale)))
+                    else:
+                        preview_frame = frame
+                    rgb_frame = cv2.cvtColor(preview_frame, cv2.COLOR_BGR2RGB)
                     frame_slot.image(rgb_frame, use_container_width=True)
 
                     if total_frames > 0:
@@ -475,7 +504,14 @@ def main():
                 has_frames = True
                 if not st.session_state.get("live_streaming_active", False):
                     break
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h_f, w_f = frame.shape[:2]
+                max_dim = max(h_f, w_f)
+                if max_dim > 1080:
+                    disp_scale = 1080.0 / max_dim
+                    preview_frame = cv2.resize(frame, (int(w_f * disp_scale), int(h_f * disp_scale)))
+                else:
+                    preview_frame = frame
+                rgb_frame = cv2.cvtColor(preview_frame, cv2.COLOR_BGR2RGB)
                 frame_slot.image(rgb_frame, use_container_width=True)
 
                 if info.get("latest_event"):
