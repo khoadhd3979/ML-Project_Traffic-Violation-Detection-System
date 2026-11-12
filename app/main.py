@@ -398,6 +398,11 @@ def main():
         frame_slot = st.empty()
         progress_slot = st.empty()
 
+        helmet_w = ROOT_DIR / "models" / "weights_helmet" / "helmet_best.pt"
+        plate_w = ROOT_DIR / "models" / "weights_plate" / "plate_best.pt"
+        if not helmet_w.exists() or not plate_w.exists():
+            st.warning("⚠️ Chưa có file trọng số AI (`helmet_best.pt` / `plate_best.pt`). Video vẫn phát bình thường nhưng chưa thể phát hiện vi phạm.")
+
         source_mode = st.radio("Nguồn video", ["Live Camera", "Upload Video"], horizontal=True, label_visibility="collapsed")
         
         uploaded_file = None
@@ -442,7 +447,15 @@ def main():
             try:
                 for frame, info in generate_live_stream(source=video_path):
                     processed_frames += 1
-                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    # Tự động co nhỏ frame hiển thị nếu video quá lớn (như 4K dọc ở 1pc.mp4) để tránh lag WebSocket
+                    h_f, w_f = frame.shape[:2]
+                    max_dim = max(h_f, w_f)
+                    if max_dim > 1080:
+                        disp_scale = 1080.0 / max_dim
+                        preview_frame = cv2.resize(frame, (int(w_f * disp_scale), int(h_f * disp_scale)))
+                    else:
+                        preview_frame = frame
+                    rgb_frame = cv2.cvtColor(preview_frame, cv2.COLOR_BGR2RGB)
                     frame_slot.image(rgb_frame, use_container_width=True)
 
                     if total_frames > 0:
@@ -485,7 +498,14 @@ def main():
                 has_frames = True
                 if not st.session_state.get("live_streaming_active", False):
                     break
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h_f, w_f = frame.shape[:2]
+                max_dim = max(h_f, w_f)
+                if max_dim > 1080:
+                    disp_scale = 1080.0 / max_dim
+                    preview_frame = cv2.resize(frame, (int(w_f * disp_scale), int(h_f * disp_scale)))
+                else:
+                    preview_frame = frame
+                rgb_frame = cv2.cvtColor(preview_frame, cv2.COLOR_BGR2RGB)
                 frame_slot.image(rgb_frame, use_container_width=True)
 
                 if info.get("latest_event"):

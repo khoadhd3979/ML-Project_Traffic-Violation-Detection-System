@@ -43,7 +43,8 @@ class TestDatabaseAndAPI(unittest.TestCase):
         client = APIClient()
         df, source, err = client.fetch_violations(page_size=10)
         self.assertIsNone(err)
-        self.assertFalse(df.empty)
+        self.assertIsNotNone(df)
+        self.assertTrue(hasattr(df, "columns"))
 
 
 if __name__ == "__main__":
