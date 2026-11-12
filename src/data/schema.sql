@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS violation_rules (
     description TEXT,                        -- Mô tả chi tiết hành vi vi phạm
     severity TEXT DEFAULT 'medium',          -- low, medium, high, critical
     penalty_amount INTEGER DEFAULT 0,        -- Mức phạt tiền quy định (VNĐ)
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT (datetime('now', 'localtime'))
 );
 
 -- 2. Bảng phiên xử lý camera/video (Processing Sessions)
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS processing_sessions (
     session_name TEXT,                       -- Tên phiên (vd: Live Camera Cổng 1, Test Video)
     source_type TEXT NOT NULL,               -- webcam, video_file, rtsp_stream
     source_path TEXT,                        -- Đường dẫn video hoặc URL stream
-    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP DEFAULT (datetime('now', 'localtime')),
     ended_at TIMESTAMP,
     total_frames INTEGER DEFAULT 0,
     status TEXT DEFAULT 'active'             -- active, completed, stopped, error
@@ -34,8 +34,8 @@ CREATE TABLE IF NOT EXISTS vehicles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     license_plate TEXT NOT NULL UNIQUE,      -- Biển số xe (ví dụ: 59A1-12345, hoặc UNKNOWN)
     vehicle_type TEXT DEFAULT 'motorbike',   -- motorbike, car, truck, bus
-    first_detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    first_detected_at TIMESTAMP DEFAULT (datetime('now', 'localtime')),
+    last_detected_at TIMESTAMP DEFAULT (datetime('now', 'localtime')),
     notes TEXT
 );
 
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS violations (
     rule_id INTEGER,
     track_id INTEGER,                        -- ID của đối tượng từ tracker (ByteTrack)
     frame_number INTEGER DEFAULT 0,          -- Số thứ tự khung hình trong video/session
-    detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    detected_at TIMESTAMP DEFAULT (datetime('now', 'localtime')),
     confidence REAL DEFAULT 0.0,             -- Độ tin cậy của phát hiện AI (0.0 -> 1.0)
     evidence_image_path TEXT,                -- Đường dẫn tương đối tới ảnh bằng chứng (data/evidence/...)
     evidence_video_clip_path TEXT,           -- Đường dẫn clip ngắn (nếu có)

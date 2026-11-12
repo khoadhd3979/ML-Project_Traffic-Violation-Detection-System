@@ -114,7 +114,7 @@ class DatabaseManager:
     ) -> int:
         query = """
             INSERT INTO processing_sessions (session_name, source_type, source_path, started_at, status)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'active');
+            VALUES (?, ?, ?, datetime('now', 'localtime'), 'active');
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -130,7 +130,7 @@ class DatabaseManager:
     ) -> None:
         query = """
             UPDATE processing_sessions
-            SET ended_at = CURRENT_TIMESTAMP, total_frames = ?, status = ?
+            SET ended_at = datetime('now', 'localtime'), total_frames = ?, status = ?
             WHERE id = ?;
         """
         with self._get_connection() as conn:
@@ -157,9 +157,9 @@ class DatabaseManager:
         clean_plate = license_plate.upper().strip()
         query = """
             INSERT INTO vehicles (license_plate, vehicle_type, first_detected_at, last_detected_at, notes)
-            VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+            VALUES (?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'), ?)
             ON CONFLICT(license_plate) DO UPDATE SET
-                last_detected_at = CURRENT_TIMESTAMP;
+                last_detected_at = datetime('now', 'localtime');
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -180,30 +180,49 @@ class DatabaseManager:
         frame_number: int = 0,
         confidence: float = 0.0,
         evidence_image_path: Optional[str] = None,
-        notes: Optional[str] = None
+        notes: Optional[str] = None,
+        detected_at: Optional[str] = None
     ) -> int:
-        query = """
-            INSERT INTO violations (
-                vehicle_id, rule_id, session_id, track_id, frame_number,
-                confidence, evidence_image_path, notes, detected_at
+        if detected_at:
+            query = """
+                INSERT INTO violations (
+                    vehicle_id, rule_id, session_id, track_id, frame_number,
+                    confidence, evidence_image_path, notes, detected_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """
+            params = (
+                vehicle_id,
+                rule_id,
+                session_id,
+                track_id,
+                frame_number,
+                confidence,
+                evidence_image_path,
+                notes,
+                detected_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);
-        """
+        else:
+            query = """
+                INSERT INTO violations (
+                    vehicle_id, rule_id, session_id, track_id, frame_number,
+                    confidence, evidence_image_path, notes, detected_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'));
+            """
+            params = (
+                vehicle_id,
+                rule_id,
+                session_id,
+                track_id,
+                frame_number,
+                confidence,
+                evidence_image_path,
+                notes
+            )
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                query,
-                (
-                    vehicle_id,
-                    rule_id,
-                    session_id,
-                    track_id,
-                    frame_number,
-                    confidence,
-                    evidence_image_path,
-                    notes
-                )
-            )
+            cursor.execute(query, params)
             conn.commit()
             return cursor.lastrowid
 
