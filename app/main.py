@@ -346,8 +346,14 @@ def main():
         is_disabled = confirm_text.strip().upper() != "XACNHAN"
         if st.button("🗑️ Khôi phục hệ thống (Reset)", disabled=is_disabled, key="admin_reset_btn"):
             if db is not None:
-                db_mgr = db.DatabaseManager()
-                db_mgr.reset_database_and_evidence("XACNHAN")
+                try:
+                    db_mgr = db.DatabaseManager()
+                    if hasattr(db_mgr, "reset_database_and_evidence"):
+                        db_mgr.reset_database_and_evidence("XACNHAN")
+                    elif hasattr(db_mgr, "reset_database"):
+                        db_mgr.reset_database("XACNHAN")
+                except Exception as e:
+                    st.error(f"Lỗi khi khôi phục hệ thống: {e}")
             st.session_state["scan_events"] = []
             st.success("✅ Đã khôi phục hệ thống và xóa toàn bộ dữ liệu thành công!")
             st.rerun()
