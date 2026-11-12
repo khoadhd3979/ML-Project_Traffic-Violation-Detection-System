@@ -1,14 +1,44 @@
 import os
-from ultralytics import YOLO
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Đường dẫn tới 2 file trọng số
 MODEL_HELMET_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "models", "weights_helmet", "helmet_best.pt"))
 MODEL_PLATE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "models", "weights_plate", "plate_best.pt"))
 
-# Load 2 model YOLOv8 riêng biệt
-model_helmet = YOLO(MODEL_HELMET_PATH)
-print(f"\n[INFO] Danh sách nhãn của Model Helmet: {model_helmet.names}\n")
-model_plate = YOLO(MODEL_PLATE_PATH)
+# Khởi tạo mô hình ở chế độ lazy loading để tránh crash/treo ứng dụng khi import
+model_helmet = None
+model_plate = None
+
+
+def _load_models():
+    """Khởi tạo mô hình YOLO an toàn khi cần sử dụng."""
+    global model_helmet, model_plate
+    if model_helmet is not None and model_plate is not None:
+        return True
+
+    try:
+        from ultralytics import YOLO
+
+        if model_helmet is None:
+            if os.path.exists(MODEL_HELMET_PATH):
+                model_helmet = YOLO(MODEL_HELMET_PATH)
+                logger.info(f"Loaded Helmet model: {model_helmet.names}")
+            else:
+                logger.warning(f"File trọng số không tồn tại: {MODEL_HELMET_PATH}")
+
+        if model_plate is None:
+            if os.path.exists(MODEL_PLATE_PATH):
+                model_plate = YOLO(MODEL_PLATE_PATH)
+                logger.info(f"Loaded Plate model: {model_plate.names}")
+            else:
+                logger.warning(f"File trọng số không tồn tại: {MODEL_PLATE_PATH}")
+
+        return model_helmet is not None and model_plate is not None
+    except Exception as e:
+        logger.error(f"Lỗi khởi tạo mô hình YOLO: {e}")
+        return False
 
 # Giữ lại tên cũ: dùng làm ngưỡng mặc định cho các class không có ngưỡng riêng
 # (class 0, 2, 3, 4). Giá trị đổi từ 0.3 -> 0.40 theo yêu cầu.
@@ -37,27 +67,13 @@ def _threshold_for(class_id):
 def track_vehicles_and_helmets(image):
     """
     Theo dõi phương tiện, nón và lỗi không đội nón bằng ByteTrack.
-
-    Class dự kiến từ model_helmet:
-        0: driver_with_helmet
-        1: bike
-        2: driver
-        3: passenger_with_helemt
-        4: passenger
-        5: driver_without_helmet
-        6: passenger_without_helemt
-
-    Ngưỡng confidence được áp dụng theo từng class (CLASS_CONF_THRESHOLDS,
-    mặc định CONF_THRESHOLD) sau khi tracker đã chạy.
-
-    Trả về: list[dict], mỗi phần tử gồm:
-        {
-            "bbox": [x1, y1, x2, y2],
-            "track_id": int hoặc None,
-            "class_id": int,
-            "conf": float
-        }
     """
+    if model_helmet is None:
+        _load_models()
+
+    if model_helmet is None:
+        return []
+
     results = model_helmet.track(
         image,
         persist=True,
@@ -98,12 +114,14 @@ def track_vehicles_and_helmets(image):
 def detect_plate_in_crop(vehicle_crop_img):
     """
     Dùng model_plate phát hiện vị trí biển số trên ảnh crop của xe máy.
-
-    Trả về:
-        [x1, y1, x2, y2] (tọa độ Bounding Box của biển số theo hệ tọa độ của vehicle_crop_img)
-        hoặc None nếu không phát hiện được biển số.
     """
     if vehicle_crop_img is None or vehicle_crop_img.size == 0:
+        return None
+
+    if model_plate is None:
+        _load_models()
+
+    if model_plate is None:
         return None
 
     results = model_plate.predict(vehicle_crop_img, verbose=False)
