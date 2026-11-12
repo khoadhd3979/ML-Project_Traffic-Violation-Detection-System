@@ -387,3 +387,18 @@ class DatabaseManager:
             cursor.execute("DELETE FROM sqlite_sequence WHERE name IN ('violations', 'processing_sessions');")
             conn.commit()
             return True
+
+    def reset_database_and_evidence(self, confirmation: str = "XACNHAN") -> bool:
+        """Xóa sạch CSDL (giữ nguyên rules) và dọn dẹp các tệp ảnh bằng chứng trong data/evidence."""
+        if confirmation != "XACNHAN":
+            return False
+        success = self.reset_database(confirmation)
+        evidence_dir = os.path.join("data", "evidence")
+        if os.path.exists(evidence_dir):
+            for root, dirs, files in os.walk(evidence_dir):
+                for f in files:
+                    try:
+                        os.remove(os.path.join(root, f))
+                    except Exception:
+                        pass
+        return success

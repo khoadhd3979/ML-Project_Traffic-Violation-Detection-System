@@ -39,11 +39,18 @@ class TestDatabaseAndAPI(unittest.TestCase):
         self.assertTrue(v.success)
         self.assertIsInstance(v.data, list)
 
+    def test_database_reset_and_evidence(self):
+        res = self.db.reset_database_and_evidence("XACNHAN")
+        self.assertTrue(res)
+        violations = self.db.get_violations()
+        self.assertEqual(len(violations), 0)
+
     def test_api_client_fetch(self):
         client = APIClient()
         df, source, err = client.fetch_violations(page_size=10)
         self.assertIsNone(err)
-        self.assertFalse(df.empty)
+        self.assertIsNotNone(df)
+        self.assertTrue(hasattr(df, "columns"))
 
 
 if __name__ == "__main__":

@@ -319,14 +319,14 @@ def main():
     for k, v in {"conf": 0.5, "ocr": True, "use_mock": False, "scan_events": []}.items():
         st.session_state.setdefault(k, v)
 
-# Thanh bên Quản trị
+    # Thanh bên Quản trị
     with st.sidebar.expander("⚙️ Cài đặt Quản trị (Dành cho Demo)"):
-        confirm_text = st.text_input("Gõ chữ 'XACNHAN' để xác nhận reset hệ thống:")
-        is_disabled = confirm_text.strip() != "XACNHAN"
-        if st.button("🗑️ Khôi phục hệ thống (Reset)", disabled=is_disabled):
+        confirm_text = st.text_input("Gõ chữ 'XACNHAN' để xác nhận reset hệ thống:", key="admin_reset_input", placeholder="XACNHAN")
+        is_disabled = confirm_text.strip().upper() != "XACNHAN"
+        if st.button("🗑️ Khôi phục hệ thống (Reset)", disabled=is_disabled, key="admin_reset_btn"):
             if db is not None:
                 db_mgr = db.DatabaseManager()
-                db_mgr.reset_database_and_evidence()
+                db_mgr.reset_database_and_evidence("XACNHAN")
             st.session_state["scan_events"] = []
             st.success("✅ Đã khôi phục hệ thống và xóa toàn bộ dữ liệu thành công!")
             st.rerun()
@@ -378,17 +378,7 @@ def main():
         else:
             st.info("Chưa có dữ liệu lịch sử.")
 
-        st.divider()
-        with st.expander("⚙️ Cài đặt Quản trị (Dành cho Demo)"):
-            confirm_text = st.text_input("Gõ chữ 'XACNHAN' để xác nhận reset hệ thống:")
-            is_disabled = confirm_text.strip() != "XACNHAN"
-            if st.button("🗑️ Khôi phục hệ thống (Reset)", disabled=is_disabled):
-                if db is not None:
-                    db_mgr = db.DatabaseManager()
-                    db_mgr.reset_database_and_evidence()
-                st.session_state["scan_events"] = []
-                st.success("✅ Đã khôi phục hệ thống và xóa toàn bộ dữ liệu thành công!")
-                st.rerun()
+
 
     # ==========================================
     # CỘT GIỮA: MÀN HÌNH CAMERA & NGUỒN PHÁT
