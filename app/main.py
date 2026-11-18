@@ -18,10 +18,19 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from src.features.live_stream import generate_live_stream
 
-# from app.components.chatbot_ui import render_chatbot  # Tạm tắt Chatbot UI theo kế hoạch
+try:
+    from src.features.live_stream import generate_live_stream
+    LIVE_STREAM_IMPORT_ERROR = None
+except Exception as e:
+    generate_live_stream = None
+    LIVE_STREAM_IMPORT_ERROR = str(e)
+
+from app.components.chatbot_ui import render_chatbot
 from app.components.violation_table import violation_label
+from app.services.api_client import APIClient
+
+api_client = APIClient()
 
 try:
     import src.data.database_manager as db
@@ -178,38 +187,10 @@ h2, h3 { font-size: 1.1rem; font-weight: 600; margin: .1rem 0 .4rem; }
 </style>
 """
 
-# ------------------------------------------------------------------ DỮ LIỆU TỪ DATABASE
+# ------------------------------------------------------------------ DỮ LIỆU TỪ DATABASE / FASTAPI
 def load_data():
-    empty_df = pd.DataFrame(columns=COLUMNS)
-    if db is None:
-        return empty_df, "Lỗi nạp database", DB_IMPORT_ERROR
-    
-    try:
-        db_mgr = db.DatabaseManager()
-        query = """
-            SELECT 
-                v.id AS ID,
-                v.frame_number AS "Track ID",
-                v.detected_at AS Time,
-                veh.license_plate AS Plate,
-                r.rule_code AS Code,
-                COALESCE(r.rule_name, v.notes, 'Vi phạm giao thông') AS Violation,
-                v.evidence_image_path AS Evidence
-            FROM violations v
-            JOIN vehicles veh ON veh.id = v.vehicle_id
-            LEFT JOIN violation_rules r ON r.id = v.rule_id
-            ORDER BY v.detected_at DESC
-        """
-        with db_mgr._get_connection() as conn:
-            df = pd.read_sql_query(query, conn)
-        
-        if df.empty:
-            return empty_df, "Dữ liệu trống", None
-            
-        df["Time"] = pd.to_datetime(df["Time"])
-        return df.reindex(columns=COLUMNS), "Cơ sở dữ liệu", None
-    except Exception as e:
-        return empty_df, "Lỗi truy vấn CSĐL", str(e)
+    """Tải dữ liệu vi phạm qua FastAPI Client (có fallback CSDL tự động)."""
+    return api_client.fetch_violations(page_size=150)
 
 def _fmt_time(t):
     if pd.isna(t) or t is None:
@@ -338,14 +319,20 @@ def main():
     for k, v in {"conf": 0.5, "ocr": True, "use_mock": False, "scan_events": []}.items():
         st.session_state.setdefault(k, v)
 
-# Thanh bên Quản trị
+    # Thanh bên Quản trị
     with st.sidebar.expander("⚙️ Cài đặt Quản trị (Dành cho Demo)"):
-        confirm_text = st.text_input("Gõ chữ 'XACNHAN' để xác nhận reset hệ thống:")
-        is_disabled = confirm_text.strip() != "XACNHAN"
-        if st.button("🗑️ Khôi phục hệ thống (Reset)", disabled=is_disabled):
+        confirm_text = st.text_input("Gõ chữ 'XACNHAN' để xác nhận reset hệ thống:", key="admin_reset_input", placeholder="XACNHAN")
+        is_disabled = confirm_text.strip().upper() != "XACNHAN"
+        if st.button("🗑️ Khôi phục hệ thống (Reset)", disabled=is_disabled, key="admin_reset_btn"):
             if db is not None:
-                db_mgr = db.DatabaseManager()
-                db_mgr.reset_database_and_evidence()
+                try:
+                    db_mgr = db.DatabaseManager()
+                    if hasattr(db_mgr, "reset_database_and_evidence"):
+                        db_mgr.reset_database_and_evidence("XACNHAN")
+                    elif hasattr(db_mgr, "reset_database"):
+                        db_mgr.reset_database("XACNHAN")
+                except Exception as e:
+                    st.error(f"Lỗi khi khôi phục hệ thống: {e}")
             st.session_state["scan_events"] = []
             st.success("✅ Đã khôi phục hệ thống và xóa toàn bộ dữ liệu thành công!")
             st.rerun()
@@ -397,17 +384,7 @@ def main():
         else:
             st.info("Chưa có dữ liệu lịch sử.")
 
-        st.divider()
-        with st.expander("⚙️ Cài đặt Quản trị (Dành cho Demo)"):
-            confirm_text = st.text_input("Gõ chữ 'XACNHAN' để xác nhận reset hệ thống:")
-            is_disabled = confirm_text.strip() != "XACNHAN"
-            if st.button("🗑️ Khôi phục hệ thống (Reset)", disabled=is_disabled):
-                if db is not None:
-                    db_mgr = db.DatabaseManager()
-                    db_mgr.reset_database_and_evidence()
-                st.session_state["scan_events"] = []
-                st.success("✅ Đã khôi phục hệ thống và xóa toàn bộ dữ liệu thành công!")
-                st.rerun()
+
 
     # ==========================================
     # CỘT GIỮA: MÀN HÌNH CAMERA & NGUỒN PHÁT
@@ -580,9 +557,9 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # Chatbot cố định khung hình (Tạm tắt theo kế hoạch phát triển UI/API)
-    # with st.container(key="chatbot"):
-    #     render_chatbot(df)
+    # Bong bóng Chatbot cố định góc màn hình
+    with st.container(key="chatbot"):
+        render_chatbot(df)
 
 if __name__ == "__main__":
     main()
