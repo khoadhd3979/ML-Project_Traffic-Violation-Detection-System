@@ -36,6 +36,9 @@ class DatabaseManager:
             if os.path.exists(schema_path):
                 self.init_db(schema_path)
 
+        # Nâng cấp DB cũ (nếu có) lên schema hiện tại
+        self._migrate()
+
     def _get_connection(self) -> sqlite3.Connection:
         """Tạo kết nối SQLite an toàn với row_factory và bật foreign key constraints."""
         conn = sqlite3.connect(
@@ -60,6 +63,39 @@ class DatabaseManager:
 
         with self._get_connection() as conn:
             conn.executescript(schema_sql)
+            conn.commit()
+
+    def _migrate(self) -> None:
+        """Nâng cấp DB cũ lên schema hiện tại: thêm cột còn thiếu vào bảng violations
+        và tạo lại view v_violation_details. Không xóa dữ liệu."""
+        expected = {
+            "session_id": "INTEGER",
+            "vehicle_id": "INTEGER",
+            "rule_id": "INTEGER",
+            "track_id": "INTEGER",
+            "frame_number": "INTEGER DEFAULT 0",
+            "detected_at": "TIMESTAMP",
+            "confidence": "REAL DEFAULT 0.0",
+            "evidence_image_path": "TEXT",
+            "evidence_video_clip_path": "TEXT",
+            "status": "TEXT DEFAULT 'pending'",
+            "notes": "TEXT",
+        }
+        with self._get_connection() as conn:
+            have = {row[1] for row in conn.execute("PRAGMA table_info(violations)")}
+            if have:
+                for col, col_type in expected.items():
+                    if col not in have:
+                        conn.execute(f"ALTER TABLE violations ADD COLUMN {col} {col_type}")
+            schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
+            if os.path.exists(schema_path):
+                with open(schema_path, "r", encoding="utf-8") as f:
+                    sql = f.read()
+                start = sql.find("CREATE VIEW")
+                end = sql.find(";", start)
+                if start >= 0 and end > start:
+                    conn.execute("DROP VIEW IF EXISTS v_violation_details")
+                    conn.execute(sql[start:end + 1])
             conn.commit()
 
     # --------------------------------------------------------------------------
