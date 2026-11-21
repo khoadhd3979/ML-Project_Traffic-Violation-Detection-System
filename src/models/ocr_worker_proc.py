@@ -10,14 +10,16 @@ import cv2
 
 
 def run(input_q, result_q):
-    from src.models.ocr_engine import PlateOCR
-
-    reader = PlateOCR(gpu=False)
+    reader = None
 
     while True:
         item = input_q.get()   # Block cho đến khi có dữ liệu
         if item is None:
             break
+
+        if reader is None:
+            from src.models.ocr_engine import PlateOCR
+            reader = PlateOCR(gpu=False)
 
         track_id, plate_crop = item
 

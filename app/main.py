@@ -438,21 +438,33 @@ def main():
             try:
                 for frame, info in generate_live_stream(source=video_path):
                     processed_frames += 1
-                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frame_slot.image(rgb_frame, use_container_width=True)
-
-                    if total_frames > 0:
-                        progress_slot.progress(min(processed_frames / total_frames, 1.0))
-
-                    if info.get("latest_event"):
+                    has_event = bool(info.get("latest_event"))
+                    if has_event:
                         ev = info["latest_event"]
-                        st.session_state.setdefault("scan_events", []).append({
-                            "track_id": ev["track_id"],
-                            "plate": ev["plate"],
-                            "code": "NO_HELMET",
-                            "time": datetime.now(),
-                            "image": None
-                        })
+                        events_list = st.session_state.setdefault("scan_events", [])
+                        existing = next((x for x in events_list if x.get("track_id") == ev["track_id"]), None)
+                        if existing is not None:
+                            existing["plate"] = ev["plate"]
+                        else:
+                            events_list.append({
+                                "track_id": ev["track_id"],
+                                "plate": ev["plate"],
+                                "code": "NO_HELMET",
+                                "time": datetime.now(),
+                                "image": None
+                            })
+
+                    if processed_frames % 3 == 1 or has_event or processed_frames == total_frames:
+                        h_f, w_f = frame.shape[:2]
+                        if max(h_f, w_f) > 960:
+                            scale = 960.0 / float(max(h_f, w_f))
+                            disp = cv2.resize(frame, (int(w_f * scale), int(h_f * scale)), interpolation=cv2.INTER_AREA)
+                        else:
+                            disp = frame
+                        rgb_frame = cv2.cvtColor(disp, cv2.COLOR_BGR2RGB)
+                        frame_slot.image(rgb_frame, use_container_width=True)
+                        if total_frames > 0:
+                            progress_slot.progress(min(processed_frames / total_frames, 1.0))
             finally:
                 if os.path.exists(video_path):
                     try:
@@ -462,6 +474,8 @@ def main():
 
             if total_frames > 0:
                 progress_slot.progress(1.0)
+            # Xóa scan_events tạm vì các bản ghi đã lưu vào SQLite và sẽ được load_data() nạp lên khi rerun
+            st.session_state["scan_events"] = []
             st.success("✅ Đã xử lý xong video!")
             st.rerun()
 
@@ -477,22 +491,38 @@ def main():
                 cam_source = cam_src_clean
 
             has_frames = False
+            live_frame_idx = 0
             for frame, info in generate_live_stream(source=cam_source):
                 has_frames = True
+                live_frame_idx += 1
                 if not st.session_state.get("live_streaming_active", False):
                     break
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frame_slot.image(rgb_frame, use_container_width=True)
 
-                if info.get("latest_event"):
+                has_event = bool(info.get("latest_event"))
+                if has_event:
                     ev = info["latest_event"]
-                    st.session_state.setdefault("scan_events", []).append({
-                        "track_id": ev["track_id"],
-                        "plate": ev["plate"],
-                        "code": "NO_HELMET",
-                        "time": datetime.now(),
-                        "image": None
-                    })
+                    events_list = st.session_state.setdefault("scan_events", [])
+                    existing = next((x for x in events_list if x.get("track_id") == ev["track_id"]), None)
+                    if existing is not None:
+                        existing["plate"] = ev["plate"]
+                    else:
+                        events_list.append({
+                            "track_id": ev["track_id"],
+                            "plate": ev["plate"],
+                            "code": "NO_HELMET",
+                            "time": datetime.now(),
+                            "image": None
+                        })
+
+                if live_frame_idx % 2 == 1 or has_event:
+                    h_f, w_f = frame.shape[:2]
+                    if max(h_f, w_f) > 960:
+                        scale = 960.0 / float(max(h_f, w_f))
+                        disp = cv2.resize(frame, (int(w_f * scale), int(h_f * scale)), interpolation=cv2.INTER_AREA)
+                    else:
+                        disp = frame
+                    rgb_frame = cv2.cvtColor(disp, cv2.COLOR_BGR2RGB)
+                    frame_slot.image(rgb_frame, use_container_width=True)
 
             if not has_frames and st.session_state.get("live_streaming_active", False):
                 st.session_state["live_streaming_active"] = False

@@ -64,6 +64,12 @@ def _threshold_for(class_id):
     return CLASS_CONF_THRESHOLDS.get(int(class_id), CONF_THRESHOLD)
 
 
+def reset_tracker():
+    """Reset trạng thái ByteTrack trước mỗi phiên video mới để tránh giữ track_id cũ."""
+    if model_helmet is not None and getattr(model_helmet, "predictor", None) is not None:
+        model_helmet.predictor = None
+
+
 def track_vehicles_and_helmets(image):
     """
     Theo dõi phương tiện, nón và lỗi không đội nón bằng ByteTrack.
@@ -111,6 +117,68 @@ def track_vehicles_and_helmets(image):
     return detections
 
 
+def verify_violation_in_crop(crop_img):
+    """
+    Xác minh giai đoạn 2 trên ảnh crop cận cảnh (người + xe):
+    Khi chạy trên toàn khung hình (4K/1080p thu về 640), đầu người ở xa rất nhỏ nên
+    mũ tối màu/nửa đầu dễ bị nhầm thành không mũ. Hàm này chạy model_helmet trực tiếp
+    trên ảnh crop cận cảnh tại thời điểm đủ chu kỳ debouncing để kiểm tra lại.
+    """
+    if crop_img is None or getattr(crop_img, "size", 0) == 0:
+        return False
+
+    if model_helmet is None:
+        _load_models()
+
+    if model_helmet is None:
+        return False
+
+    results = model_helmet.predict(crop_img, conf=TRACK_CONF, verbose=False)
+    if not results or len(results) == 0:
+        return False
+
+    boxes = results[0].boxes
+    if boxes is None or len(boxes) == 0:
+        return False
+
+    xyxy = boxes.xyxy.cpu().numpy()
+    class_ids = boxes.cls.cpu().numpy().astype(int)
+    confs = boxes.conf.cpu().numpy()
+
+    no_helmets = []
+    helmets = []
+    for bbox, cls_id, conf in zip(xyxy, class_ids, confs):
+        c = float(conf)
+        cid = int(cls_id)
+        if c <= _threshold_for(cid):
+            continue
+        b = [float(x) for x in bbox]
+        if cid in (5, 6):
+            no_helmets.append((b, c))
+        elif cid in (0, 3):
+            helmets.append((b, c))
+
+    if not no_helmets:
+        return False
+
+    from src.features.processing import _iou, HELMET_CONFLICT_IOU
+    for nh_box, nh_conf in no_helmets:
+        if not any(h_conf >= nh_conf and _iou(nh_box, h_box) >= HELMET_CONFLICT_IOU for h_box, h_conf in helmets):
+            return True
+
+    return False
+
+
+# Ngưỡng lọc biển số xe máy trong vùng crop xe: loại biển 1 dòng của ô tô (w/h > 2.2),
+# biển ở phần trên/rìa nền sau xe (cy < 35% cao hoặc cx sát rìa < 15% ngang) và biển quá nhỏ ở xa.
+PLATE_CONF_THRESHOLD = 0.45
+PLATE_MIN_ASPECT = 0.80
+PLATE_MAX_ASPECT = 2.20
+PLATE_MIN_Y_RATIO = 0.35
+PLATE_SIDE_MARGIN_RATIO = 0.15
+PLATE_MIN_W_RATIO = 0.12
+
+
 def detect_plate_in_crop(vehicle_crop_img):
     """
     Dùng model_plate phát hiện vị trí biển số trên ảnh crop của xe máy.
@@ -124,7 +192,11 @@ def detect_plate_in_crop(vehicle_crop_img):
     if model_plate is None:
         return None
 
-    results = model_plate.predict(vehicle_crop_img, verbose=False)
+    h_crop, w_crop = vehicle_crop_img.shape[:2]
+    if h_crop <= 0 or w_crop <= 0:
+        return None
+
+    results = model_plate.predict(vehicle_crop_img, conf=PLATE_CONF_THRESHOLD, verbose=False)
     if not results or len(results) == 0:
         return None
 
@@ -132,7 +204,30 @@ def detect_plate_in_crop(vehicle_crop_img):
     if boxes is None or len(boxes) == 0:
         return None
 
-    # Lấy bounding box có confidence cao nhất
-    best_idx = boxes.conf.argmax().item()
-    best_bbox = boxes.xyxy[best_idx].cpu().numpy().tolist()
-    return [float(x) for x in best_bbox]
+    xyxy = boxes.xyxy.cpu().numpy()
+    confs = boxes.conf.cpu().numpy()
+
+    best_bbox = None
+    best_conf = -1.0
+    min_x = PLATE_SIDE_MARGIN_RATIO * w_crop
+    max_x = (1.0 - PLATE_SIDE_MARGIN_RATIO) * w_crop
+    for bbox, conf in zip(xyxy, confs):
+        c = float(conf)
+        if c < PLATE_CONF_THRESHOLD:
+            continue
+        x1, y1, x2, y2 = (float(v) for v in bbox)
+        bw, bh = x2 - x1, y2 - y1
+        if bw <= 0 or bh <= 0:
+            continue
+        aspect = bw / bh
+        cx = (x1 + x2) / 2.0
+        cy = (y1 + y2) / 2.0
+        if not (PLATE_MIN_ASPECT <= aspect <= PLATE_MAX_ASPECT):
+            continue
+        if cy < PLATE_MIN_Y_RATIO * h_crop or not (min_x <= cx <= max_x) or bw < PLATE_MIN_W_RATIO * w_crop:
+            continue
+        if c > best_conf:
+            best_conf = c
+            best_bbox = [x1, y1, x2, y2]
+
+    return best_bbox

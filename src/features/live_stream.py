@@ -5,7 +5,7 @@ import cv2
 import multiprocessing as mp
 
 from src.models.detection import track_vehicles_and_helmets, detect_plate_in_crop
-from src.features.processing import process_plate, check_helmet_violation, crop_with_padding
+from src.features.processing import process_plate, check_helmet_violation, crop_with_padding, _iou
 from src.models import ocr_worker_proc
 from src.data.database_manager import DatabaseManager
 
@@ -15,6 +15,29 @@ from src.data.database_manager import DatabaseManager
 # nên 1 cycle = 1 frame. Hằng số bất biến, không phải state dùng chung.
 # Lưu ý: xác nhận theo track_id của XE, không chứng minh cùng một NGƯỜI vi phạm qua các cycle.
 VIOLATION_CONFIRM_FRAMES = 3
+STAGE2_REJECT_COOLDOWN_FRAMES = 15
+MAX_PLATE_ATTEMPTS = 3
+ID_SWITCH_IOU_THRESHOLD = 0.45
+ID_SWITCH_MAX_AGE_FRAMES = 15
+
+
+def _draw_box_label(frame, bbox, label, color, thickness=2, fill_label=True):
+    """Vẽ khung và nhãn lên frame, tự clamp vào kích thước ảnh."""
+    h_frame, w_frame = frame.shape[:2]
+    x1, y1, x2, y2 = map(int, bbox)
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(w_frame, x2), min(h_frame, y2)
+    if x2 <= x1 or y2 <= y1:
+        return
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+    (w_txt, h_txt), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+    if fill_label:
+        cv2.rectangle(frame, (x1, max(0, y1 - h_txt - 10)), (x1 + w_txt + 10, y1), color, -1)
+        txt_color = (255, 255, 255)
+    else:
+        txt_color = color
+    cv2.putText(frame, label, (x1 + 5, max(15, y1 - 5)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, txt_color, 2)
 
 
 def generate_live_stream(source=0):
@@ -94,12 +117,20 @@ def generate_live_stream(source=0):
         return
 
     ocr_sent_time = {}       # track_id -> timestamp
-    recorded_violations = {} # track_id -> plate_text
+    plate_attempts = {}      # track_id -> số lần đã thử detect biển số
+    recorded_violations = {} # track_id -> dict thông tin violation
     track_plates = {}        # track_id -> plate_text
+    recorded_last_seen = {}  # track_id -> (frame_count, bbox) để chống trùng khi ID switch
 
     # --- Debouncing state: LOCAL cho từng generator (mỗi camera/video một bộ độc lập) ---
-    violation_streaks = {}   # track_id -> số inference cycle liên tiếp có vi phạm (chỉ track chưa ghi nhận)
-    pending_evidence = {}    # track_id -> đường dẫn evidence đã lưu nhưng DB chưa ghi được (để retry không lưu trùng)
+    violation_streaks = {}      # track_id -> số inference cycle liên tiếp có vi phạm (chỉ track chưa ghi nhận)
+    pending_evidence = {}       # track_id -> đường dẫn evidence đã lưu nhưng DB chưa ghi được (để retry không lưu trùng)
+    stage2_cooldown_until = {}  # track_id -> frame_count được phép kiểm tra lại sau khi Stage 2 bác bỏ
+    stage2_rejected_count = 0
+
+    reset_fn = getattr(sys.modules.get("src.models.detection"), "reset_tracker", None)
+    if reset_fn is not None:
+        reset_fn()
 
     frame_count = 0
     prev_time = time.time()
@@ -140,11 +171,41 @@ def generate_live_stream(source=0):
                             pass
 
             confirmed_vehicles = []
+            rejected_this_cycle = []
+            verify_crop_fn = getattr(sys.modules.get("src.models.detection"), "verify_violation_in_crop", None)
             for tid, v in current_violators.items():
                 if tid not in recorded_violations:
+                    if frame_count < stage2_cooldown_until.get(tid, 0):
+                        continue
                     violation_streaks[tid] = violation_streaks.get(tid, 0) + 1
                     if violation_streaks[tid] < VIOLATION_CONFIRM_FRAMES:
                         continue
+                    if tid not in pending_evidence and verify_crop_fn is not None:
+                        crop_check = crop_with_padding(frame, v.get("full_violator_bbox"))
+                        if not verify_crop_fn(crop_check):
+                            violation_streaks[tid] = 0
+                            stage2_cooldown_until[tid] = frame_count + STAGE2_REJECT_COOLDOWN_FRAMES
+                            stage2_rejected_count += 1
+                            rejected_this_cycle.append(v)
+                            print(f"[Stage2 Reject] track_id={tid}: anh crop can canh xac nhan CO MU (bo qua)")
+                            continue
+
+                    # Chống lưu trùng cùng một xe khi ByteTrack bị đổi track_id (ID switch)
+                    matched_old_tid = None
+                    for old_tid, (last_f, old_bbox) in recorded_last_seen.items():
+                        if old_tid in current_violators:
+                            continue
+                        if (frame_count - last_f) <= ID_SWITCH_MAX_AGE_FRAMES and _iou(v["bbox"], old_bbox) >= ID_SWITCH_IOU_THRESHOLD:
+                            matched_old_tid = old_tid
+                            break
+                    if matched_old_tid is not None:
+                        recorded_violations[tid] = recorded_violations[matched_old_tid]
+                        track_plates[tid] = track_plates.get(matched_old_tid, "UNKNOWN")
+                        violation_streaks.pop(tid, None)
+                        pending_evidence.pop(tid, None)
+
+                if tid in recorded_violations:
+                    recorded_last_seen[tid] = (frame_count, v["bbox"])
                 confirmed_vehicles.append(v)
 
             for v in confirmed_vehicles:
@@ -208,6 +269,7 @@ def generate_live_stream(source=0):
                             "evidence_path": evidence_rel_path
                         }
                         track_plates[track_id] = "UNKNOWN"
+                        recorded_last_seen[track_id] = (frame_count, v["bbox"])
                         violation_streaks.pop(track_id, None)
                         pending_evidence.pop(track_id, None)
 
@@ -224,16 +286,25 @@ def generate_live_stream(source=0):
                         print(f"[LiveStream DB Error] {db_err}")
 
 
-                # OCR chỉ chạy cho xe đã xác nhận VÀ đã có violation record (để kết quả OCR cập nhật được record).
+                # OCR chỉ chạy cho xe đã xác nhận, chưa đọc được biển số và chưa vượt số lần thử tối đa.
                 last_sent = ocr_sent_time.get(track_id, 0.0)
-                if track_id in recorded_violations and vehicle_crop.size > 0 and (now - last_sent) >= 1.0:
+                rec_entry = recorded_violations.get(track_id)
+                attempts = plate_attempts.get(track_id, 0)
+                if (
+                    rec_entry is not None
+                    and rec_entry.get("plate", "UNKNOWN") == "UNKNOWN"
+                    and attempts < MAX_PLATE_ATTEMPTS
+                    and vehicle_crop.size > 0
+                    and (now - last_sent) >= 1.0
+                ):
+                    plate_attempts[track_id] = attempts + 1
+                    ocr_sent_time[track_id] = now
                     plate_bbox = detect_plate_in_crop(vehicle_crop)
                     if plate_bbox is not None:
                         enhanced_plate = process_plate(vehicle_crop, plate_bbox)
                         if enhanced_plate is not None and not input_q.full():
                             try:
                                 input_q.put_nowait((track_id, enhanced_plate))
-                                ocr_sent_time[track_id] = now
                             except Exception:
                                 pass
 
@@ -276,27 +347,52 @@ def generate_live_stream(source=0):
             except Exception:
                 pass
 
-            # 3. Draw bounding boxes & labels (chỉ xe đã xác nhận)
+            # 3. Draw bounding boxes & labels (xe dang theo doi, non bao hiem, bac bo Stage 2, va vi pham da xac nhan)
+            confirmed_ids = {v["track_id"] for v in confirmed_vehicles}
+            rejected_ids = {v["track_id"] for v in rejected_this_cycle}
+            bike_count = 0
+            helmet_count = 0
+
+            for det in detections:
+                cls_id = det.get("class_id")
+                bbox = det.get("bbox")
+                if not bbox:
+                    continue
+                if cls_id == 1:
+                    bike_count += 1
+                    tid = det.get("track_id")
+                    if tid not in confirmed_ids and tid not in rejected_ids:
+                        lbl = f"Xe {tid}" if tid is not None else "Xe"
+                        _draw_box_label(frame, bbox, lbl, (255, 180, 0), thickness=1, fill_label=False)
+                elif cls_id in (0, 3):
+                    helmet_count += 1
+                    conf = det.get("conf")
+                    lbl = f"CO MU {conf:.2f}" if conf is not None else "CO MU"
+                    _draw_box_label(frame, bbox, lbl, (0, 200, 0), thickness=2, fill_label=False)
+
+            for v in rejected_this_cycle:
+                _draw_box_label(frame, v["bbox"], f"ID {v['track_id']}: XAC MINH CO MU", (0, 215, 255), thickness=2)
+
             for v in confirmed_vehicles:
                 track_id = v["track_id"]
-                vx1, vy1, vx2, vy2 = map(int, v["bbox"])
-                vx1, vy1 = max(0, vx1), max(0, vy1)
-                vx2, vy2 = min(w_frame, vx2), min(h_frame, vy2)
-
-                cv2.rectangle(frame, (vx1, vy1), (vx2, vy2), (0, 0, 255), 2)
                 plate_str = track_plates.get(track_id, "KHONG DOI NON")
-                label = f"ID {track_id}: {plate_str}"
-
-                (w_txt, h_txt), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                cv2.rectangle(frame, (vx1, max(0, vy1 - h_txt - 10)), (vx1 + w_txt + 10, vy1), (0, 0, 255), -1)
-                cv2.putText(frame, label, (vx1 + 5, max(15, vy1 - 5)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                _draw_box_label(frame, v["bbox"], f"ID {track_id}: {plate_str}", (0, 0, 255), thickness=2)
 
             curr_time = time.time()
             fps = 1.0 / (curr_time - prev_time) if (curr_time - prev_time) > 0 else 0
             prev_time = curr_time
-            cv2.putText(frame, f"FPS: {fps:.1f} | Vi pham: {len(confirmed_vehicles)}", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            hud_scale = 1.4 if w_frame >= 1500 else 0.7
+            hud_thick = 3 if w_frame >= 1500 else 2
+            hud_y = 55 if w_frame >= 1500 else 30
+            cv2.putText(
+                frame,
+                f"FPS: {fps:.1f} | Xe: {bike_count} | Co mu: {helmet_count} | Bac bo S2: {stage2_rejected_count} | Vi pham: {len(confirmed_vehicles)}",
+                (15, hud_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                hud_scale,
+                (0, 255, 0),
+                hud_thick,
+            )
 
             info = {
                 "fps": fps,
