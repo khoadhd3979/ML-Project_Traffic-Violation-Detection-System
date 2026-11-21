@@ -66,27 +66,55 @@ class DatabaseManager:
             conn.commit()
 
     def _migrate(self) -> None:
-        """Nâng cấp DB cũ lên schema hiện tại: thêm cột còn thiếu vào bảng violations
+        """Nâng cấp DB cũ lên schema hiện tại: thêm cột còn thiếu vào cả 4 bảng
         và tạo lại view v_violation_details. Không xóa dữ liệu."""
         expected = {
-            "session_id": "INTEGER",
-            "vehicle_id": "INTEGER",
-            "rule_id": "INTEGER",
-            "track_id": "INTEGER",
-            "frame_number": "INTEGER DEFAULT 0",
-            "detected_at": "TIMESTAMP",
-            "confidence": "REAL DEFAULT 0.0",
-            "evidence_image_path": "TEXT",
-            "evidence_video_clip_path": "TEXT",
-            "status": "TEXT DEFAULT 'pending'",
-            "notes": "TEXT",
+            "violations": {
+                "session_id": "INTEGER",
+                "vehicle_id": "INTEGER",
+                "rule_id": "INTEGER",
+                "track_id": "INTEGER",
+                "frame_number": "INTEGER DEFAULT 0",
+                "detected_at": "TIMESTAMP",
+                "confidence": "REAL DEFAULT 0.0",
+                "evidence_image_path": "TEXT",
+                "evidence_video_clip_path": "TEXT",
+                "status": "TEXT DEFAULT 'pending'",
+                "notes": "TEXT",
+            },
+            "violation_rules": {
+                "rule_code": "TEXT",
+                "rule_name": "TEXT",
+                "description": "TEXT",
+                "severity": "TEXT DEFAULT 'medium'",
+                "penalty_amount": "INTEGER DEFAULT 0",
+                "created_at": "TIMESTAMP",
+            },
+            "vehicles": {
+                "license_plate": "TEXT",
+                "vehicle_type": "TEXT DEFAULT 'motorbike'",
+                "first_detected_at": "TIMESTAMP",
+                "last_detected_at": "TIMESTAMP",
+                "notes": "TEXT",
+            },
+            "processing_sessions": {
+                "session_name": "TEXT",
+                "source_type": "TEXT",
+                "source_path": "TEXT",
+                "started_at": "TIMESTAMP",
+                "ended_at": "TIMESTAMP",
+                "total_frames": "INTEGER DEFAULT 0",
+                "status": "TEXT DEFAULT 'active'",
+            },
         }
         with self._get_connection() as conn:
-            have = {row[1] for row in conn.execute("PRAGMA table_info(violations)")}
-            if have:
-                for col, col_type in expected.items():
+            for table, columns in expected.items():
+                have = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+                if not have:
+                    continue
+                for col, col_type in columns.items():
                     if col not in have:
-                        conn.execute(f"ALTER TABLE violations ADD COLUMN {col} {col_type}")
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
             schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
             if os.path.exists(schema_path):
                 with open(schema_path, "r", encoding="utf-8") as f:

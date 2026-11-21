@@ -190,7 +190,7 @@ h2, h3 { font-size: 1.1rem; font-weight: 600; margin: .1rem 0 .4rem; }
 # ------------------------------------------------------------------ DỮ LIỆU TỪ DATABASE / FASTAPI
 def load_data():
     """Tải dữ liệu vi phạm qua FastAPI Client (có fallback CSDL tự động)."""
-    return api_client.fetch_violations(page_size=150)
+    return api_client.fetch_violations(page_size=100)
 
 def _fmt_time(t):
     if pd.isna(t) or t is None:

@@ -1,0 +1,11 @@
+train: /content/dataset/content/smart-helmet-detection-using-dl/data/train
+val: /content/dataset/content/smart-helmet-detection-using-dl/data/valid
+nc: 7
+names:
+- driver_with_helmet
+- bike
+- driver
+- passenger_with_helemt
+- passenger
+- driver_without_helmet
+- passenger_without_helemt
