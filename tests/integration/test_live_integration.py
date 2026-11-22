@@ -156,7 +156,10 @@ class Run:
 
 
 class Env:
-    def __init__(self, tmp_path, monkeypatch):
+    def __init__(self, tmp_path, monkeypatch, confirm=None):
+        monkeypatch.delenv("VIOLATION_CONFIRM_FRAMES", raising=False)   # mặc định không phụ thuộc môi trường máy chạy test
+        if confirm is not None:
+            monkeypatch.setenv("VIOLATION_CONFIRM_FRAMES", confirm)
         self.ocr_mode = "manual"          # "manual": chờ flush_ocr(); "auto": trả biển số ngay
         self.ocr_log, self.input_queues = [], []
         self.det_calls = 0
@@ -259,6 +262,36 @@ def test_confirmed_violation_saves_full_person_and_bike_evidence_then_updates_pl
 # ----------------------------------------------------------------------------- debouncing
 def test_confirm_constant_is_three(env):
     assert env.live.VIOLATION_CONFIRM_FRAMES == 3
+
+
+def test_confirm_frames_env_override_to_five(tmp_path, monkeypatch):
+    e = Env(tmp_path, monkeypatch, confirm="5")
+    assert e.live.VIOLATION_CONFIRM_FRAMES == 5
+    r = e.run([V] * 6)
+    assert r.creates == [0, 0, 0, 0, 1, 1]                    # chỉ xác nhận ở cycle thứ 5
+    assert r.counts == [0, 0, 0, 0, 1, 1]
+    assert e.ocr_log == [(5, 11)]
+    assert len(e.evidence()) == 1
+
+
+def test_confirm_frames_env_five_gap_resets(tmp_path, monkeypatch):
+    e = Env(tmp_path, monkeypatch, confirm="5")
+    e.run([V, V, V, V, GONE, V, V, V, V])                      # 4 + 4 không liên tiếp => không xác nhận
+    assert e.db.calls == [] and e.evidence() == []
+
+
+def test_confirm_frames_env_one_confirms_immediately(tmp_path, monkeypatch):
+    e = Env(tmp_path, monkeypatch, confirm=" 1 ")              # khoảng trắng được chấp nhận
+    r = e.run([V, V])
+    assert e.live.VIOLATION_CONFIRM_FRAMES == 1 and r.creates == [1, 1]
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "abc", "0", "-2", "2.5", "3 frames"])
+def test_confirm_frames_env_invalid_falls_back_to_three(tmp_path, monkeypatch, bad):
+    e = Env(tmp_path, monkeypatch, confirm=bad)
+    assert e.live.VIOLATION_CONFIRM_FRAMES == 3
+    r = e.run([V, V, V])
+    assert r.creates == [0, 0, 1]
 
 
 def test_db01_single_cycle_not_recorded(env):

@@ -259,3 +259,5 @@ __pycache__/
 .pytest_cache/
 
 .pdf
+docs/repo_tree.txt
+/scratch

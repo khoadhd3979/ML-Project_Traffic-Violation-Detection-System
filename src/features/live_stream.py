@@ -12,9 +12,29 @@ from src.data.database_manager import DatabaseManager
 # Số inference cycle LIÊN TIẾP mà cùng một track_id xe phải xuất hiện trong kết quả
 # check_helmet_violation() trước khi vi phạm được xác nhận (mới tạo Evidence / DB record / OCR).
 # Hiện YOLO chạy trên MỌI frame đọc được (không có frame skipping trong vòng lặp này),
-# nên 1 cycle = 1 frame. Hằng số bất biến, không phải state dùng chung.
+# nên 1 cycle = 1 frame. Mặc định 3; có thể đổi KHÔNG cần sửa code bằng biến môi trường
+# VIOLATION_CONFIRM_FRAMES (số nguyên >= 1), đọc một lần khi module được nạp. Giá trị không hợp lệ
+# (rỗng, không phải số nguyên, < 1) bị bỏ qua và dùng mặc định. Hằng số bất biến, không phải state dùng chung.
 # Lưu ý: xác nhận theo track_id của XE, không chứng minh cùng một NGƯỜI vi phạm qua các cycle.
-VIOLATION_CONFIRM_FRAMES = 3
+DEFAULT_VIOLATION_CONFIRM_FRAMES = 3
+
+
+def _confirm_frames_from_env(default=DEFAULT_VIOLATION_CONFIRM_FRAMES):
+    raw = os.environ.get("VIOLATION_CONFIRM_FRAMES")
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        print(f"[LiveStream Warning] VIOLATION_CONFIRM_FRAMES={raw!r} không phải số nguyên, dùng mặc định {default}")
+        return default
+    if value < 1:
+        print(f"[LiveStream Warning] VIOLATION_CONFIRM_FRAMES={value} phải >= 1, dùng mặc định {default}")
+        return default
+    return value
+
+
+VIOLATION_CONFIRM_FRAMES = _confirm_frames_from_env()
 
 
 def generate_live_stream(source=0):
@@ -31,6 +51,8 @@ def generate_live_stream(source=0):
             info_dict (dict): Thông tin trạng thái gồm FPS, số vụ vi phạm, sự kiện mới nhất...
                 "violating_vehicles"/"violating_count" chỉ gồm các xe ĐÃ XÁC NHẬN ở cycle hiện tại.
     """
+    print(f"[LiveStream] VIOLATION_CONFIRM_FRAMES = {VIOLATION_CONFIRM_FRAMES}")
+
     # Chuẩn hóa nguồn camera / video
     if source is None or str(source).strip() == "":
         source = 0
